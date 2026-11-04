@@ -955,9 +955,15 @@
                 
                 const badge = document.createElement('button');
                 badge.className = "glass-card hover:bg-slate-700/80 text-slate-200 px-2.5 py-1 rounded-xl text-xs flex items-center gap-1 transition-colors";
-                badge.innerHTML = `<span class="w-2 h-2 rounded-full" style="background-color: ${getGroupColor(neighbor.group)}"></span>
-                                   <span>${neighbor.id}</span>
-                                   <span class="text-[10px] text-slate-400 font-mono">${rel}</span>`;
+                const dot = document.createElement('span');
+                dot.className = "w-2 h-2 rounded-full";
+                dot.style.backgroundColor = getGroupColor(neighbor.group);
+                const nameEl = document.createElement('span');
+                nameEl.textContent = neighbor.id;
+                const relEl = document.createElement('span');
+                relEl.className = "text-[10px] text-slate-400 font-mono";
+                relEl.textContent = rel;
+                badge.append(dot, nameEl, relEl);
                 badge.onclick = () => selectNode(neighbor);
                 neighborContainer.appendChild(badge);
             });
@@ -1000,11 +1006,19 @@
 
                     const item = document.createElement('div');
                     item.className = "p-2 hover:bg-slate-800/80 rounded-xl cursor-pointer flex items-center justify-between text-xs";
-                    item.innerHTML = `<div class="flex items-center space-x-2">
-                                        <span class="w-2.5 h-2.5 rounded-full" style="background-color: ${getGroupColor(node.group)}"></span>
-                                        <span class="font-medium text-white">${node.id}</span>
-                                      </div>
-                                      <span class="text-[10px] text-slate-400">${node.group}</span>`;
+                    const left = document.createElement('div');
+                    left.className = "flex items-center space-x-2";
+                    const dot = document.createElement('span');
+                    dot.className = "w-2.5 h-2.5 rounded-full";
+                    dot.style.backgroundColor = getGroupColor(node.group);
+                    const nameEl = document.createElement('span');
+                    nameEl.className = "font-medium text-white";
+                    nameEl.textContent = node.id;
+                    left.append(dot, nameEl);
+                    const groupEl = document.createElement('span');
+                    groupEl.className = "text-[10px] text-slate-400";
+                    groupEl.textContent = node.group;
+                    item.append(left, groupEl);
                     item.onclick = () => {
                         selectNode(node);
                         focusNode(node);
@@ -1014,7 +1028,10 @@
                 });
 
                 if (matches.length === 0) {
-                    searchResults.innerHTML = `<div class="p-2 text-xs text-slate-400 text-center">No nodes match "${query}"</div>`;
+                    const empty = document.createElement('div');
+                    empty.className = "p-2 text-xs text-slate-400 text-center";
+                    empty.textContent = `No nodes match "${query}"`;
+                    searchResults.replaceChildren(empty);
                 }
             } else {
                 clearSearchBtn.classList.add('hidden');
@@ -1231,11 +1248,18 @@
 
                 const item = document.createElement('div');
                 item.className = "flex items-center justify-between text-xs text-slate-300 py-0.5";
-                item.innerHTML = `<div class="flex items-center space-x-2">
-                                    <span class="w-2.5 h-2.5 rounded-full" style="background-color: ${color}"></span>
-                                    <span>${g}</span>
-                                  </div>
-                                  <span class="text-[10px] text-slate-500 font-mono">${count}</span>`;
+                const left = document.createElement('div');
+                left.className = "flex items-center space-x-2";
+                const dot = document.createElement('span');
+                dot.className = "w-2.5 h-2.5 rounded-full";
+                dot.style.backgroundColor = color;
+                const nameEl = document.createElement('span');
+                nameEl.textContent = g;
+                left.append(dot, nameEl);
+                const countEl = document.createElement('span');
+                countEl.className = "text-[10px] text-slate-500 font-mono";
+                countEl.textContent = count;
+                item.append(left, countEl);
                 legend.appendChild(item);
             });
         }
