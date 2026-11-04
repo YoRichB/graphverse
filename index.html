@@ -573,6 +573,7 @@
             .on('zoom', (event) => {
                 state.transform = event.transform;
                 document.getElementById('zoom-level').innerText = `${Math.round(event.transform.k * 100)}%`;
+                requestRender();
             });
 
         d3.select(canvas).call(zoomBehavior).on("dblclick.zoom", null);
@@ -588,7 +589,7 @@
                 .force("collide", d3.forceCollide().radius(d => (d.val || 20) + state.collisionRadius - 15))
                 .force("x", d3.forceX(width / 2).strength(state.gravity))
                 .force("y", d3.forceY(height / 2).strength(state.gravity))
-                .on("tick", render);
+                .on("tick", requestRender);
 
             updateLegend();
             updateStats();
@@ -596,6 +597,14 @@
         }
 
         // Main Rendering Loop
+        // Coalesce redraws into one per animation frame
+        let renderQueued = false;
+        function requestRender() {
+            if (renderQueued) return;
+            renderQueued = true;
+            requestAnimationFrame(() => { renderQueued = false; render(); });
+        }
+
         function render() {
             ctx.save();
             ctx.clearRect(0, 0, width, height);
@@ -863,13 +872,13 @@
             if (state.isDragging && state.draggedNode) {
                 state.draggedNode.fx = pt.x;
                 state.draggedNode.fy = pt.y;
-                render();
+                requestRender();
             } else {
                 const hoverNode = findNodeAtPoint(pt);
                 if (hoverNode !== state.hoveredNode) {
                     state.hoveredNode = hoverNode;
                     canvas.classList.toggle('node-hover', !!hoverNode);
-                    render();
+                    requestRender();
                 }
             }
         });
