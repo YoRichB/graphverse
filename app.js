@@ -109,7 +109,14 @@ const GROUP_COLORS = {
     "TF": "#a78bfa"
 };
 
-function getGroupColor(group) { return GROUP_COLORS[group] || "#8A93B8"; }
+// Categories outside the presets (imports, live trends) get Neon Pulse colors in order of appearance.
+const PALETTE = ["#22E4FF", "#FF3DCB", "#B55BF0", "#3DDC97", "#FFC857", "#fb923c", "#38bdf8", "#f472b6", "#a78bfa", "#34d399"];
+const dynColors = new Map();
+function getGroupColor(group) {
+    if (GROUP_COLORS[group]) return GROUP_COLORS[group];
+    if (!dynColors.has(group)) dynColors.set(group, PALETTE[dynColors.size % PALETTE.length]);
+    return dynColors.get(group);
+}
 const MAX_NAME = 40, MAX_GROUP = 30, MAX_EDGE = 30;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const mobileMQ = window.matchMedia('(max-width: 767px)');
@@ -118,6 +125,8 @@ const isFiniteXY = (n) => n && Number.isFinite(n.x) && Number.isFinite(n.y);
 const radiusOf = (n) => (n.val || 20) / 2 + 6;
 const labelOf = (n) => n.label || n.id;
 const isPinned = (n) => n.fx != null;
+const idOf = (end) => (end && typeof end === 'object') ? end.id : end;
+const calm = () => state.reduceMotion;
 
 function cloneDataset(key) {
     const d = DATASETS[key];
@@ -143,7 +152,11 @@ const state = {
     showNodeLabels: true, showEdgeLabels: true, showArrows: true, isCurved: false,
     charge: -240, linkDistance: 80, collisionRadius: 30, gravity: 0.15,
     dragging: null,
-    needsFit: true
+    needsFit: true,
+    graphName: 'Tech Ecosystem',
+    kbdNode: null,
+    reduceMotion: reducedMotion.matches,
+    loadToken: 0
 };
 window.GraphVerse = { state, DATASETS };
 
@@ -179,9 +192,16 @@ function initSimulation() {
         .force('x', d3.forceX(width / 2).strength(state.gravity))
         .force('y', d3.forceY(height / 2).strength(state.gravity))
         .on('tick', onTick);
-    if (reducedMotion.matches) { state.simulation.stop(); state.simulation.tick(300); requestRender(); }
+    if (calm()) settleNow(1);
     if (state.isPaused) state.simulation.stop();
     refreshUI();
+}
+// Reduced motion: run the layout to rest off-screen and draw once, instead of animating it.
+function settleNow(alpha) {
+    const sim = state.simulation;
+    sim.stop(); sim.alpha(alpha);
+    for (let i = 0; i < 300 && sim.alpha() > sim.alphaMin(); i++) sim.tick();
+    requestRender();
 }
 function onTick() {
     if (state.needsFit && state.simulation.alpha() < 0.12) { state.needsFit = false; fitToView(true); }
@@ -192,13 +212,13 @@ function syncSimulation(alpha) {
     const sim = state.simulation;
     sim.nodes(state.graphData.nodes);
     sim.force('link').links(state.graphData.links);
-    if (!state.isPaused) sim.alpha(alpha == null ? 0.3 : alpha).restart();
+    if (!state.isPaused) { if (calm()) settleNow(alpha == null ? 0.3 : alpha); else sim.alpha(alpha == null ? 0.3 : alpha).restart(); }
     refreshUI();
     requestRender();
 }
 function kick(alpha) {
     if (state.isPaused) setPaused(false);
-    state.simulation.alpha(alpha).restart();
+    if (calm()) settleNow(alpha); else state.simulation.alpha(alpha).restart();
 }
 function setPaused(paused) {
     state.isPaused = paused;
@@ -209,6 +229,7 @@ function setPaused(paused) {
     const icon = lucide.icon(paused ? 'play' : 'pause');
     if (old && icon) old.replaceWith(icon);
     if (paused) state.simulation.stop();
+    else if (calm()) settleNow(Math.max(state.simulation.alpha(), 0.3));
     else state.simulation.alpha(Math.max(state.simulation.alpha(), 0.3)).restart();
 }
 
@@ -280,6 +301,13 @@ function render() {
             ctx.beginPath(); ctx.arc(node.x + r * 0.7, node.y - r * 0.7, 4, 0, 2 * Math.PI);
             ctx.fillStyle = '#FFC857'; ctx.fill();
         }
+        if (node === state.kbdNode && canvasHasKbdFocus) {
+            ctx.globalAlpha = 1;
+            ctx.beginPath(); ctx.arc(node.x, node.y, r + 10, 0, 2 * Math.PI);
+            ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 3; ctx.stroke();
+            ctx.beginPath(); ctx.arc(node.x, node.y, r + 13, 0, 2 * Math.PI);
+            ctx.strokeStyle = '#FF3DCB'; ctx.lineWidth = 2; ctx.stroke();
+        }
         if (state.showNodeLabels) {
             const text = labelOf(node);
             ctx.font = `${isSel ? 600 : 500} 11px Inter, system-ui, sans-serif`;
@@ -319,7 +347,7 @@ function drawEdgeLabel(text, x, y, alpha) {
     const w = ctx.measureText(text).width;
     ctx.fillStyle = `rgba(10,11,20,${alpha * 0.9})`;
     ctx.beginPath(); ctx.roundRect(x - w / 2 - 3, y - 6, w + 6, 12, 3); ctx.fill();
-    ctx.fillStyle = `rgba(169,177,214,${Math.max(alpha, 0.4)})`;
+    ctx.fillStyle = `rgba(169,177,214,${Math.max(alpha, 0.75)})`;
     ctx.fillText(text, x, y);
 }
 
@@ -406,6 +434,7 @@ canvas.addEventListener('click', (e) => {
         return;
     }
     lastTap = { node, time: now };
+    if (node) state.kbdNode = node;
     // On phones the inspector is a bottom sheet: open it only after the double-tap
     // window so a second tap can't land on the sheet.
     if (node && mobileMQ.matches) pendingSelect = setTimeout(() => selectNode(node), 360);
@@ -446,14 +475,18 @@ function visibleRect() {
 }
 function animateTo(transform, ms) {
     const sel = d3.select(canvas);
-    if (reducedMotion.matches || !ms) sel.call(zoomBehavior.transform, transform);
+    if (calm() || !ms) sel.call(zoomBehavior.transform, transform);
     else sel.transition().duration(ms).call(zoomBehavior.transform, transform);
 }
 function fitToView(animate) {
     const ns = state.graphData.nodes.filter(isFiniteXY);
     if (!ns.length) return;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const n of ns) { const r = radiusOf(n) + 18; x0 = Math.min(x0, n.x - r); y0 = Math.min(y0, n.y - r); x1 = Math.max(x1, n.x + r); y1 = Math.max(y1, n.y + r); }
+    for (const n of ns) {
+        const r = radiusOf(n) + 18;
+        const hw = state.showNodeLabels ? Math.max(r, labelOf(n).length * 3.2 + 8) : r; // keep labels on screen too
+        x0 = Math.min(x0, n.x - hw); y0 = Math.min(y0, n.y - r); x1 = Math.max(x1, n.x + hw); y1 = Math.max(y1, n.y + r + (state.showNodeLabels ? 12 : 0));
+    }
     const v = visibleRect();
     const k = Math.max(0.15, Math.min(2.2, 0.92 * Math.min((v.right - v.left) / (x1 - x0), (v.bottom - v.top) / (y1 - y0))));
     const cx = (v.left + v.right) / 2, cy = (v.top + v.bottom) / 2;
@@ -496,6 +529,7 @@ function selectNode(node) {
         updateInspectorData();
         insp.querySelector('.inspector-body').scrollTop = 0;
         requestAnimationFrame(() => keepNodeVisible(node));
+        announce(`Details open: ${describeNode(node)} ${node.desc || ''}`.trim());
     } else {
         insp.hidden = true;
     }
@@ -509,6 +543,15 @@ function updateInspectorData() {
     const dot = $('inspector-color-dot');
     dot.style.backgroundColor = getGroupColor(node.group); dot.style.color = getGroupColor(node.group);
     $('inspector-description').textContent = node.desc || `Node in the ${node.group} group.`;
+    const url = safeUrl(node.url);
+    $('inspector-extra').hidden = !(url || node.idea || node.meta);
+    $('inspector-meta').textContent = node.meta || '';
+    $('inspector-meta').hidden = !node.meta;
+    $('inspector-idea').textContent = node.idea || '';
+    $('inspector-idea-wrap').hidden = !node.idea;
+    const a = $('inspector-link');
+    a.hidden = !url;
+    if (url) a.href = url; else a.removeAttribute('href');
     const links = state.graphData.links.filter(l => l.source === node || l.target === node);
     $('inspector-degree').textContent = `${links.length} link${links.length === 1 ? '' : 's'}`;
     const pinned = isPinned(node);
@@ -526,6 +569,7 @@ function updateInspectorData() {
         const name = document.createElement('span'); name.textContent = labelOf(nb);
         b.append(d, name);
         if (l.label) { const rel = document.createElement('span'); rel.className = 'rel'; rel.textContent = l.label; b.append(rel); }
+        b.setAttribute('aria-label', `${labelOf(nb)}${l.label ? `, ${l.label}` : ''}. Open details`);
         b.addEventListener('click', () => { selectNode(nb); focusNode(nb); });
         box.append(b);
     }
@@ -674,8 +718,9 @@ bindSlider('gravity-slider', 'gravity-val', v => { state.gravity = v; state.simu
 $('toggle-play-btn').addEventListener('click', () => setPaused(!state.isPaused));
 $('reheat-btn').addEventListener('click', () => kick(1));
 
-$('zoom-in').addEventListener('click', () => d3.select(canvas).transition().duration(reducedMotion.matches ? 0 : 250).call(zoomBehavior.scaleBy, 1.3));
-$('zoom-out').addEventListener('click', () => d3.select(canvas).transition().duration(reducedMotion.matches ? 0 : 250).call(zoomBehavior.scaleBy, 1 / 1.3));
+function zoomBy(f) { d3.select(canvas).transition().duration(calm() ? 0 : 250).call(zoomBehavior.scaleBy, f); }
+$('zoom-in').addEventListener('click', () => zoomBy(1.3));
+$('zoom-out').addEventListener('click', () => zoomBy(1 / 1.3));
 $('zoom-reset').addEventListener('click', () => fitToView(true));
 
 /* ---------- Controls panel: side panel on desktop, bottom sheet on mobile ---------- */
@@ -725,20 +770,32 @@ presetModal.querySelectorAll('.preset-option').forEach(btn => {
     btn.addEventListener('click', () => { loadPreset(btn.dataset.preset); presetModal.close(); });
 });
 function loadPreset(key) {
+    if (key === 'trends') return loadTrends();
     if (!DATASETS[key]) return;
+    loadGraph(cloneDataset(key), key, DATASETS[key].name);
+}
+// Swap in a new graph: reset search, selection and zoom, then start the layout.
+function loadGraph(graph, key, name, opts = {}) {
+    state.loadToken++;
     state.presetKey = key;
-    state.graphData = cloneDataset(key);
+    state.graphName = name;
+    state.graphData = graph;
     clearSearch();
     setResultsOpen(false);
     state.hoveredNode = null;
+    state.kbdNode = null;
     selectNode(null);
+    if (opts.settings) applySettings(opts.settings);
     d3.select(canvas).interrupt().call(zoomBehavior.transform, d3.zoomIdentity);
     state.needsFit = true;
-    $('preset-badge').textContent = DATASETS[key].name;
+    $('preset-badge').textContent = name;
+    $('preset-badge').title = name;
     presetModal.querySelectorAll('.preset-option').forEach(b => b.setAttribute('aria-current', String(b.dataset.preset === key)));
     initSimulation();
+    if (opts.positioned && !calm()) state.simulation.alpha(0.3);
     if (state.isPaused) setPaused(false);
-    if (reducedMotion.matches) { state.needsFit = false; fitToView(false); }
+    if (calm()) { state.needsFit = false; fitToView(false); }
+    announce(`${name} loaded: ${graph.nodes.length} nodes, ${graph.links.length} links.`);
 }
 
 /* ---------- Add node ---------- */
@@ -795,12 +852,22 @@ $('add-node-form').addEventListener('submit', (e) => {
     showToast(`Added ${label}`);
 });
 
-/* ---------- Global keys: Esc closes the topmost layer ---------- */
+/* ---------- Global keys: Esc closes the topmost layer; / searches; ? shows shortcuts ---------- */
 document.addEventListener('keydown', (e) => {
+    const typing = e.target.closest && e.target.closest('input, textarea, select, [contenteditable="true"]');
+    if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && !document.querySelector('dialog[open]')) {
+        if (e.key === '/') { e.preventDefault(); searchInput.focus(); return; }
+        if (e.key === '?') { e.preventDefault(); openDialog(shortcutsModal); return; }
+    }
     if (e.key !== 'Escape' || e.defaultPrevented) return;
     if (document.querySelector('dialog[open]')) return; // native dialog handles Esc
     if (!$('delete-confirm').hidden) { hideDeleteConfirm(); $('delete-node-btn').focus(); return; }
-    if (state.selectedNode) { selectNode(null); return; }
+    if (state.selectedNode) {
+        const fromInspector = $('inspector-drawer').contains(document.activeElement);
+        selectNode(null);
+        if (fromInspector || document.activeElement === canvas) canvas.focus();
+        return;
+    }
     if (mobileMQ.matches && controls.classList.contains('open')) { setControlsOpen(false); controlsToggle.focus(); return; }
     if (state.searchQuery) clearSearch();
 });
@@ -825,11 +892,367 @@ function refreshUI() {
     $('graph-stats').textContent = `${nn} node${nn === 1 ? '' : 's'} · ${nl} link${nl === 1 ? '' : 's'}`;
 }
 
+/* ---------- Screen reader announcements ---------- */
+const liveRegion = $('gv-live');
+let announceTimer = 0;
+function announce(text) {
+    clearTimeout(announceTimer);
+    liveRegion.textContent = '';
+    announceTimer = setTimeout(() => { liveRegion.textContent = text; }, 60);
+}
+function degreeOf(node) { let d = 0; for (const l of state.graphData.links) if (l.source === node || l.target === node) d++; return d; }
+function describeNode(node) {
+    const d = degreeOf(node);
+    return `${labelOf(node)}, ${node.group}, ${d} link${d === 1 ? '' : 's'}${isPinned(node) ? ', pinned' : ''}.`;
+}
+
+/* ---------- Keyboard navigation on the canvas ---------- */
+let canvasHasKbdFocus = false;
+function nodesInView() { return state.graphData.nodes.filter(isFiniteXY); }
+function nodeNearestCenter() {
+    const v = visibleRect(), [cx, cy] = toGraph((v.left + v.right) / 2, (v.top + v.bottom) / 2);
+    let best = null, bd = Infinity;
+    for (const n of nodesInView()) { const d = (n.x - cx) ** 2 + (n.y - cy) ** 2; if (d < bd) { bd = d; best = n; } }
+    return best;
+}
+// Nearest node within a 90-degree cone in the arrow's direction; sideways distance costs double.
+function nodeInDirection(from, dx, dy) {
+    let best = null, bs = Infinity;
+    for (const n of nodesInView()) {
+        if (n === from) continue;
+        const vx = n.x - from.x, vy = n.y - from.y;
+        const along = vx * dx + vy * dy, side = Math.abs(vx * dy - vy * dx);
+        if (along <= 0 || side > along) continue;
+        const score = along + side * 2;
+        if (score < bs) { bs = score; best = n; }
+    }
+    return best;
+}
+function setKbdNode(node) {
+    if (!node) return;
+    state.kbdNode = node;
+    keepNodeVisible(node);
+    announce(describeNode(node));
+    requestRender();
+}
+canvas.addEventListener('focus', () => {
+    canvasHasKbdFocus = canvas.matches(':focus-visible');
+    if (canvasHasKbdFocus) {
+        if (!state.kbdNode || !state.graphData.nodes.includes(state.kbdNode)) state.kbdNode = state.selectedNode || nodeNearestCenter();
+        if (state.kbdNode) announce(`${state.graphName} graph, ${state.graphData.nodes.length} nodes. ${describeNode(state.kbdNode)}`);
+    }
+    requestRender();
+});
+canvas.addEventListener('blur', () => { canvasHasKbdFocus = false; requestRender(); });
+canvas.addEventListener('pointerdown', () => { canvasHasKbdFocus = false; });
+const ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+canvas.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    canvasHasKbdFocus = true;
+    const nodes = state.graphData.nodes;
+    if (!nodes.length) return;
+    let cur = nodes.includes(state.kbdNode) ? state.kbdNode : null;
+    if (ARROWS[e.key]) {
+        e.preventDefault();
+        if (!cur) return setKbdNode(state.selectedNode || nodeNearestCenter());
+        const next = nodeInDirection(cur, ...ARROWS[e.key]);
+        if (next) setKbdNode(next); else announce(`No node further ${e.key.slice(5).toLowerCase()}. ${describeNode(cur)}`);
+        return;
+    }
+    if (e.key === ']' || e.key === '[') {
+        e.preventDefault();
+        const i = cur ? nodes.indexOf(cur) : -1;
+        setKbdNode(nodes[(i + (e.key === ']' ? 1 : -1) + nodes.length) % nodes.length]);
+        return;
+    }
+    if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomBy(1.3); return; }
+    if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomBy(1 / 1.3); return; }
+    if (e.key === '0') { e.preventDefault(); fitToView(true); return; }
+    if (!cur) return;
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectNode(cur); }
+    else if (e.key === 'p' || e.key === 'P') { e.preventDefault(); togglePin(cur); announce(describeNode(cur)); }
+    else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); focusNode(cur); }
+});
+
+/* ---------- Reduce motion (follows the OS setting, can be switched in Controls) ---------- */
+const motionToggle = $('toggle-reduce-motion');
+function setReduceMotion(on) {
+    state.reduceMotion = on;
+    motionToggle.checked = on;
+    document.body.classList.toggle('calm', on);
+    if (on && state.simulation && !state.isPaused) settleNow(state.simulation.alpha());
+}
+motionToggle.addEventListener('change', (e) => setReduceMotion(e.target.checked));
+reducedMotion.addEventListener('change', (e) => setReduceMotion(e.matches));
+
+/* ---------- Settings (sliders and display toggles) ---------- */
+const SLIDERS = { charge: ['charge-slider', 'charge-val'], linkDistance: ['distance-slider', 'distance-val'], collisionRadius: ['collide-slider', 'collide-val'], gravity: ['gravity-slider', 'gravity-val'] };
+const TOGGLES = { showNodeLabels: 'toggle-node-labels', showEdgeLabels: 'toggle-edge-labels', showArrows: 'toggle-arrows', isCurved: 'toggle-curved' };
+function readSettings() {
+    const o = {};
+    for (const k of Object.keys(SLIDERS)) o[k] = state[k];
+    for (const k of Object.keys(TOGGLES)) o[k] = state[k];
+    return o;
+}
+// Only known keys, numbers clamped to each slider's own range.
+function applySettings(s) {
+    if (!s || typeof s !== 'object') return;
+    for (const [k, [id, outId]] of Object.entries(SLIDERS)) {
+        const el = $(id), v = Number(s[k]);
+        if (!Number.isFinite(v)) continue;
+        el.value = String(Math.min(+el.max, Math.max(+el.min, v)));
+        state[k] = +el.value; $(outId).textContent = el.value;
+    }
+    for (const [k, id] of Object.entries(TOGGLES)) if (typeof s[k] === 'boolean') { state[k] = s[k]; $(id).checked = s[k]; }
+}
+
+/* ---------- Save / import / export ---------- */
+const STORE_KEY = 'graphverse:saved:v1';
+const MAX_NODES = 1500, MAX_LINKS = 5000, MAX_FILE = 2 * 1024 * 1024;
+const fileModal = $('file-modal'), fileError = $('file-error'), shortcutsModal = $('shortcuts-modal');
+function serializeGraph() {
+    const r = (v) => Math.round(v * 10) / 10;
+    return {
+        app: 'GraphVerse', format: 1, name: state.graphName, source: state.presetKey, savedAt: new Date().toISOString(),
+        settings: readSettings(),
+        nodes: state.graphData.nodes.map(n => {
+            const o = { id: n.id, label: labelOf(n), group: n.group, val: n.val || 20 };
+            if (n.desc) o.desc = n.desc;
+            if (n.url) o.url = n.url;
+            if (n.idea) o.idea = n.idea;
+            if (n.meta) o.meta = n.meta;
+            if (isFiniteXY(n)) { o.x = r(n.x); o.y = r(n.y); }
+            if (isPinned(n)) o.pinned = true;
+            return o;
+        }),
+        links: state.graphData.links.map(l => ({ source: idOf(l.source), target: idOf(l.target), label: l.label || '' }))
+    };
+}
+function safeUrl(u) {
+    if (typeof u !== 'string') return '';
+    try { const x = new URL(u); return x.protocol === 'https:' ? x.href : ''; } catch { return ''; }
+}
+const str = (v, max) => (typeof v === 'string' || typeof v === 'number') ? cleanText(String(v), max) : '';
+// Validate untrusted JSON (imports and localStorage) into a clean graph. Throws a readable Error.
+function parseGraph(obj) {
+    if (!obj || typeof obj !== 'object' || !Array.isArray(obj.nodes)) throw new Error('This file has no "nodes" list, so it isn\'t a GraphVerse graph.');
+    if (!obj.nodes.length) throw new Error('This graph has no nodes.');
+    if (obj.nodes.length > MAX_NODES) throw new Error(`This graph has ${obj.nodes.length} nodes; the limit is ${MAX_NODES}.`);
+    const links = Array.isArray(obj.links) ? obj.links : [];
+    if (links.length > MAX_LINKS) throw new Error(`This graph has ${links.length} links; the limit is ${MAX_LINKS}.`);
+    const nodes = [], ids = new Set();
+    for (const raw of obj.nodes) {
+        if (!raw || typeof raw !== 'object') continue;
+        const id = str(raw.id, 120);
+        if (!id || ids.has(id)) continue;
+        ids.add(id);
+        const val = Number(raw.val);
+        const n = { id, label: str(raw.label, 80) || id.slice(0, 80), group: str(raw.group, MAX_GROUP) || 'Imported', val: Number.isFinite(val) ? Math.min(60, Math.max(6, val)) : 20 };
+        const desc = str(raw.desc, 600); if (desc) n.desc = desc;
+        const url = safeUrl(raw.url); if (url) n.url = url;
+        const idea = str(raw.idea, 400); if (idea) n.idea = idea;
+        const meta = str(raw.meta, 120); if (meta) n.meta = meta;
+        const x = Number(raw.x), y = Number(raw.y);
+        if (Number.isFinite(x) && Number.isFinite(y) && Math.abs(x) < 1e6 && Math.abs(y) < 1e6) {
+            n.x = x; n.y = y;
+            if (raw.pinned === true) { n.fx = x; n.fy = y; }
+        }
+        nodes.push(n);
+    }
+    if (!nodes.length) throw new Error('None of the nodes in this file have a usable id.');
+    const out = [];
+    for (const raw of links) {
+        if (!raw || typeof raw !== 'object') continue;
+        const s = str(idOf(raw.source), 120), t = str(idOf(raw.target), 120);
+        if (!ids.has(s) || !ids.has(t) || s === t) continue;
+        out.push({ source: s, target: t, label: str(raw.label, 40) });
+    }
+    return { name: str(obj.name, 60) || 'Imported graph', source: str(obj.source, 20), settings: obj.settings, positioned: nodes.some(isFiniteXY), graph: { nodes, links: out } };
+}
+function loadParsed(p, fallbackName) {
+    const key = p.source === 'trends' ? 'trends' : 'custom';
+    loadGraph(p.graph, key, p.name || fallbackName, { settings: p.settings, positioned: p.positioned });
+}
+function readSaved() {
+    try { const raw = localStorage.getItem(STORE_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
+}
+function fmtDate(iso) {
+    const d = new Date(iso);
+    return isNaN(d) ? 'an earlier visit' : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+function refreshSavedInfo() {
+    const s = readSaved();
+    $('saved-info').textContent = s && Array.isArray(s.nodes)
+        ? `Saved: "${str(s.name, 60) || 'Graph'}", ${s.nodes.length} nodes, ${fmtDate(s.savedAt)}.`
+        : 'Nothing saved yet. Saving keeps a copy in this browser only.';
+    $('load-local').disabled = !s; $('clear-local').disabled = !s;
+}
+function slug(t) { return String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'graph'; }
+function downloadBlob(blob, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+const fileName = (ext) => `graphverse-${slug(state.graphName)}-${new Date().toISOString().slice(0, 10)}.${ext}`;
+
+$('file-btn').addEventListener('click', () => { fileError.textContent = ''; refreshSavedInfo(); openDialog(fileModal, $('save-local')); });
+$('shortcuts-btn').addEventListener('click', () => openDialog(shortcutsModal));
+$('save-local').addEventListener('click', () => {
+    try {
+        localStorage.setItem(STORE_KEY, JSON.stringify(serializeGraph()));
+        fileModal.close(); showToast(`Saved "${state.graphName}" in this browser`);
+    } catch { fileError.textContent = 'This browser blocked saving (private mode or storage full). Try Export JSON instead.'; }
+});
+$('load-local').addEventListener('click', () => {
+    const s = readSaved();
+    if (!s) { refreshSavedInfo(); return; }
+    try { loadParsed(parseGraph(s), 'Saved graph'); fileModal.close(); showToast(`Loaded your saved graph`); }
+    catch (err) { fileError.textContent = `The saved graph couldn't be loaded: ${err.message}`; }
+});
+$('clear-local').addEventListener('click', () => {
+    try { localStorage.removeItem(STORE_KEY); } catch { /* ignore */ }
+    refreshSavedInfo(); $('save-local').focus(); announce('Saved graph deleted.');
+});
+$('export-json').addEventListener('click', () => {
+    downloadBlob(new Blob([JSON.stringify(serializeGraph(), null, 2)], { type: 'application/json' }), fileName('json'));
+    fileModal.close(); showToast('Exported JSON');
+});
+$('import-json').addEventListener('click', () => { $('import-file').value = ''; $('import-file').click(); });
+$('import-file').addEventListener('change', async (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    fileError.textContent = '';
+    if (f.size > MAX_FILE) { fileError.textContent = 'That file is over 2 MB, which is too big to import.'; return; }
+    try {
+        let obj;
+        try { obj = JSON.parse(await f.text()); } catch { throw new Error('That file isn\'t valid JSON.'); }
+        const p = parseGraph(obj);
+        loadParsed(p, f.name.replace(/\.json$/i, ''));
+        fileModal.close(); showToast(`Imported "${state.graphName}"`);
+    } catch (err) { fileError.textContent = err.message; }
+});
+$('export-png').addEventListener('click', () => {
+    render();
+    const out = document.createElement('canvas');
+    out.width = canvas.width; out.height = canvas.height;
+    const o = out.getContext('2d');
+    o.fillStyle = '#0A0B14'; o.fillRect(0, 0, out.width, out.height);
+    o.drawImage(canvas, 0, 0);
+    o.font = `600 ${13 * dpr}px Inter, system-ui, sans-serif`; o.textAlign = 'right'; o.textBaseline = 'bottom';
+    o.fillStyle = 'rgba(169,177,214,0.85)';
+    o.fillText(`GraphVerse · ${state.graphName} · aitrendz.org`, out.width - 16 * dpr, out.height - 14 * dpr);
+    out.toBlob((b) => { if (b) downloadBlob(b, fileName('png')); }, 'image/png');
+    fileModal.close(); showToast('Exported PNG');
+});
+
+/* ---------- Live AI Trends dataset (reads aitrendz.org/trends.json in the browser) ---------- */
+const TRENDS_URL = 'https://aitrendz.org/trends.json';
+const TOPIC_NAMES = { ai: 'AI', si: 'SI', agents: 'Agents', tools: 'Tools' };
+const topicName = (t) => TOPIC_NAMES[t] || (t.charAt(0).toUpperCase() + t.slice(1));
+function trendsSources() {
+    const h = location.hostname;
+    const sameOrigin = /(^|\.)aitrendz\.org$/.test(h) || /\.pages\.dev$/.test(h);
+    return sameOrigin ? ['/trends.json', TRENDS_URL] : [TRENDS_URL];
+}
+async function fetchJSON(url, ms) {
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms);
+    try {
+        const res = await fetch(url, { signal: ctl.signal, cache: 'no-cache', credentials: 'omit' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+    } finally { clearTimeout(t); }
+}
+async function getTrends() {
+    for (const url of trendsSources()) {
+        try {
+            const d = await fetchJSON(url, 6000);
+            if (d && Array.isArray(d.items) && d.items.length) return { data: d, live: true };
+        } catch { /* try the next source */ }
+    }
+    const snap = window.GV_TRENDS_SNAPSHOT;
+    if (snap && Array.isArray(snap.items) && snap.items.length) return { data: snap, live: false };
+    throw new Error('no trends data');
+}
+// One hub per topic; each story links to its topic hub, and stories that share a tag link to each other.
+function buildTrendsGraph(d) {
+    const items = d.items.filter(it => it && typeof it === 'object' && str(it.id, 120) && str(it.title, 200)).slice(0, 80);
+    const nodes = [], links = [], hubs = new Map();
+    const ed = Number.isFinite(+d.edition) ? +d.edition : null;
+    for (const it of items) {
+        const topic = str(it.topic, 30).toLowerCase() || 'other';
+        const group = topicName(topic);
+        if (!hubs.has(topic)) {
+            const hub = { id: `topic:${topic}`, label: group, group, val: 34, count: 0, kind: 'topic' };
+            hubs.set(topic, hub); nodes.push(hub);
+        }
+        const hub = hubs.get(topic); hub.count++;
+        const title = str(it.title, 200);
+        const src = it.source && typeof it.source === 'object' ? it.source : {};
+        const node = {
+            id: `item:${str(it.id, 120)}`, label: title.length > 30 ? `${title.slice(0, 29).trim()}…` : title, group, val: 16,
+            desc: str(it.summary, 600) || title, idea: str(it.build_idea, 400), url: safeUrl(src.url),
+            meta: [str(src.name, 60), str(it.date, 20)].filter(Boolean).join(' · '),
+            tags: Array.isArray(it.tags) ? it.tags.map(t => str(t, 30).toLowerCase()).filter(Boolean).slice(0, 8) : []
+        };
+        nodes.push(node);
+        links.push({ source: node.id, target: hub.id, label: '' });
+    }
+    const stories = nodes.filter(n => n.kind !== 'topic');
+    const byTag = new Map();
+    stories.forEach(n => n.tags.forEach(t => { if (!byTag.has(t)) byTag.set(t, []); byTag.get(t).push(n); }));
+    const seen = new Set();
+    for (const [tag, list] of byTag) {
+        if (list.length < 2 || list.length > 8) continue; // skip one-offs and catch-all tags
+        for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+            const key = `${list[i].id}|${list[j].id}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            links.push({ source: list[i].id, target: list[j].id, label: `#${tag}` });
+        }
+    }
+    const deg = new Map();
+    links.forEach(l => { deg.set(l.source, (deg.get(l.source) || 0) + 1); deg.set(l.target, (deg.get(l.target) || 0) + 1); });
+    for (const n of nodes) {
+        if (n.kind === 'topic') { n.desc = `${n.count} ${n.count === 1 ? 'story' : 'stories'} in the ${n.label} topic${ed ? ` in Trends edition ${ed}` : ''}.`; delete n.count; delete n.kind; }
+        else { n.val = Math.min(28, 14 + 4 * ((deg.get(n.id) || 1) - 1)); delete n.tags; }
+    }
+    return { graph: { nodes, links }, edition: ed };
+}
+async function loadTrends() {
+    const token = ++state.loadToken;
+    showToast('Loading live AI trends…');
+    let res;
+    try { res = await getTrends(); }
+    catch { if (token === state.loadToken) showToast("Couldn't load AI trends right now. Your current graph is unchanged."); return; }
+    if (token !== state.loadToken) return; // another dataset was picked meanwhile
+    const { graph, edition } = buildTrendsGraph(res.data);
+    if (!graph.nodes.length) { showToast("The trends file was empty. Your current graph is unchanged."); return; }
+    const name = `AI Trends${edition ? ` · Ed. ${edition}` : ''}`;
+    // Story titles are long, so give the layout more room than the small presets.
+    loadGraph(graph, 'trends', name, { settings: { charge: -520, linkDistance: 120, collisionRadius: 46 } });
+    const stories = graph.nodes.filter(n => !n.id.startsWith('topic:')).length;
+    showToast(res.live ? `Live: ${stories} stories from Trends edition ${edition || ''}`.trim()
+        : `Live trends unreachable, showing the saved snapshot (edition ${edition || '?'})`);
+}
+
 /* ---------- Boot ---------- */
 lucide.createIcons();
+setReduceMotion(reducedMotion.matches);
 syncControlsLayout();
 resizeCanvas();
 presetModal.querySelector('[data-preset="tech"]').setAttribute('aria-current', 'true');
 initSimulation();
-if (reducedMotion.matches) { state.needsFit = false; fitToView(false); }
+if (calm()) { state.needsFit = false; fitToView(false); }
+(() => {
+    const want = (new URLSearchParams(location.search).get('preset') || location.hash.slice(1)).toLowerCase();
+    if (want && want !== 'tech' && (want === 'trends' || DATASETS[want])) { loadPreset(want); return; }
+    const saved = readSaved();
+    if (saved && Array.isArray(saved.nodes)) {
+        showToast(`You have a saved graph from ${fmtDate(saved.savedAt)}`, 'Load', () => {
+            try { loadParsed(parseGraph(saved), 'Saved graph'); } catch { showToast("The saved graph couldn't be loaded."); }
+        });
+    }
+})();
+Object.assign(window.GraphVerse, { serializeGraph, parseGraph, buildTrendsGraph, loadTrends });
 })();

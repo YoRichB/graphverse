@@ -16,7 +16,10 @@ A full-bleed, interactive force-directed network graph app built with HTML5 Canv
 - **Preset datasets:** Tech Ecosystem, Social Network and Biological Signaling. Switching resets search, selection and zoom.
 - **Add and remove nodes:** add nodes and links straight into the running simulation (no rebuild). Names are trimmed, capped at 40 characters and checked for duplicates ignoring case, with inline error messages. Removing a node asks for confirmation and can be undone.
 - **Mobile layout:** full-width search row, Add and Presets always reachable, controls in a bottom sheet behind a "Controls" button, the inspector as a scrollable bottom sheet that keeps the selected node in view, and 44px touch targets.
-- **Keyboard and dialogs:** native `<dialog>` modals with focus trapping, Esc to close and focus return; visible focus rings; labelled icon buttons.
+- **Keyboard and screen readers:** Tab to the graph, then arrow keys move to the nearest node in that direction (`[` / `]` step through every node), Enter opens details, P pins, F centers, `+` `-` `0` zoom and fit, `/` searches and `?` lists all shortcuts. A live region announces the focused node and the inspector's contents. Native `<dialog>` modals with focus trapping, Esc to close and focus return; visible neon focus rings; labelled icon buttons; no axe-core violations at desktop or phone widths.
+- **Reduced motion:** follows the OS "reduce motion" setting (or the Controls toggle): the layout settles instantly and zooms jump instead of animating.
+- **Save, import and export:** save the current graph (nodes, links, positions, pins and settings) in this browser, export or import it as JSON, or export a PNG of the view. Imports are validated: size limits, de-duplicated ids, links to missing nodes dropped, numbers clamped, https-only links and all text rendered as plain text.
+- **Live AI Trends dataset:** the "Live AI Trends" preset (or `?preset=trends`) reads [aitrendz.org/trends.json](https://aitrendz.org/trends.json) in the browser and links each story to its topic and to stories that share a tag. Story details include the summary, a build idea and a link to the source. If the live file can't be reached it falls back to a bundled snapshot (`trends-snapshot.js`), and if that fails too the current graph stays put.
 
 ## Run it
 

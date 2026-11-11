@@ -11,7 +11,18 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <canvas id="graph-canvas" aria-label="Network graph"></canvas>
+    <main class="graph-main" aria-label="GraphVerse graph">
+        <canvas id="graph-canvas" tabindex="0" role="application" aria-roledescription="interactive network graph" aria-label="Network graph" aria-describedby="graph-help"></canvas>
+        <p id="graph-help" class="sr-only">Arrow keys move between nodes. Enter opens a node's details, P pins it, F centers it. Plus and minus zoom, 0 fits the graph. Press question mark for all shortcuts.</p>
+        <div id="gv-live" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+        <!-- Zoom toolbar -->
+        <div class="zoombar panel" role="toolbar" aria-label="Zoom">
+            <button id="zoom-in" class="icon-btn" type="button" aria-label="Zoom in"><i data-lucide="zoom-in"></i></button>
+            <button id="zoom-out" class="icon-btn" type="button" aria-label="Zoom out"><i data-lucide="zoom-out"></i></button>
+            <button id="zoom-reset" class="icon-btn" type="button" aria-label="Fit graph to screen" title="Fit to screen"><i data-lucide="maximize-2"></i></button>
+            <span id="zoom-level" class="mono muted small" aria-live="off">100%</span>
+        </div>
+    </main>
 
     <!-- Top bar -->
     <header class="topbar">
@@ -36,8 +47,10 @@
 
         <div class="actions panel">
             <button id="add-node-btn" class="icon-btn" type="button" aria-label="Add node" title="Add node"><i data-lucide="circle-plus"></i></button>
+            <button id="file-btn" class="icon-btn" type="button" aria-haspopup="dialog" aria-label="Save, import and export" title="Save, import and export"><i data-lucide="share-2"></i></button>
+            <button id="shortcuts-btn" class="icon-btn desk-only" type="button" aria-haspopup="dialog" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)"><i data-lucide="keyboard"></i></button>
             <button id="preset-select-toggle" class="text-btn" type="button" aria-haspopup="dialog" title="Switch dataset"><i data-lucide="database"></i><span>Presets</span></button>
-            <button id="controls-toggle" class="text-btn" type="button" aria-expanded="false" aria-controls="controls-panel"><i data-lucide="sliders-horizontal"></i><span>Controls</span></button>
+            <button id="controls-toggle" class="text-btn" type="button" aria-label="Controls" aria-expanded="false" aria-controls="controls-panel"><i data-lucide="sliders-horizontal"></i><span>Controls</span></button>
         </div>
     </header>
 
@@ -81,11 +94,12 @@
             <label class="check"><span>Edge labels</span><input type="checkbox" id="toggle-edge-labels" checked></label>
             <label class="check"><span>Edge arrows</span><input type="checkbox" id="toggle-arrows" checked></label>
             <label class="check"><span>Curved links</span><input type="checkbox" id="toggle-curved"></label>
+            <label class="check"><span>Reduce motion</span><input type="checkbox" id="toggle-reduce-motion"></label>
         </fieldset>
 
         <div class="legend-wrap">
             <h3 class="section-title">Categories</h3>
-            <ul id="category-legend" class="legend"></ul>
+            <ul id="category-legend" class="legend" tabindex="0" aria-label="Categories and node counts"></ul>
         </div>
 
         <nav class="panel-links" aria-label="GraphVerse links">
@@ -94,21 +108,13 @@
         </nav>
     </aside>
 
-    <!-- Zoom toolbar -->
-    <div class="zoombar panel" role="toolbar" aria-label="Zoom">
-        <button id="zoom-in" class="icon-btn" type="button" aria-label="Zoom in"><i data-lucide="zoom-in"></i></button>
-        <button id="zoom-out" class="icon-btn" type="button" aria-label="Zoom out"><i data-lucide="zoom-out"></i></button>
-        <button id="zoom-reset" class="icon-btn" type="button" aria-label="Fit graph to screen" title="Fit to screen"><i data-lucide="maximize-2"></i></button>
-        <span id="zoom-level" class="mono muted small" aria-live="off">100%</span>
-    </div>
-
     <nav class="float-links" aria-label="GraphVerse links">
         <a href="https://aitrendz.org/projects" class="panel">&larr; Back to AiTrendz</a>
         <a href="https://github.com/YoRichB/graphverse" class="panel" target="_blank" rel="noopener noreferrer">View on GitHub</a>
     </nav>
 
     <!-- Inspector (right drawer on desktop, bottom sheet on mobile) -->
-    <aside id="inspector-drawer" class="inspector panel sheet" aria-labelledby="inspector-title" hidden>
+    <aside id="inspector-drawer" class="inspector panel sheet" aria-labelledby="inspector-title" aria-describedby="inspector-description" hidden>
         <div class="inspector-head">
             <span id="inspector-color-dot" class="dot dot-lg"></span>
             <h2 id="inspector-title" class="inspector-title">Node</h2>
@@ -124,8 +130,13 @@
                 <div class="label">Description</div>
                 <p id="inspector-description" class="card desc"></p>
             </div>
+            <div id="inspector-extra" hidden>
+                <p id="inspector-meta" class="muted small meta"></p>
+                <div id="inspector-idea-wrap"><div class="label">Build idea</div><p id="inspector-idea" class="card desc"></p></div>
+                <a id="inspector-link" class="btn" href="#" target="_blank" rel="noopener noreferrer"><i data-lucide="external-link"></i> <span>Read the source</span><span class="sr-only"> (opens in a new tab)</span></a>
+            </div>
             <div>
-                <div class="label">Connections</div>
+                <div class="label" id="inspector-conn-label">Connections</div>
                 <div id="inspector-neighbors" class="chips"></div>
             </div>
             <div class="inspector-actions">
@@ -152,7 +163,54 @@
             <button data-preset="tech" class="preset-option card" type="button"><i data-lucide="cpu"></i><span><strong>Tech Ecosystem</strong><span class="muted">Languages, frameworks, cloud and databases.</span></span></button>
             <button data-preset="social" class="preset-option card" type="button"><i data-lucide="users"></i><span><strong>Social Network</strong><span class="muted">Teams, members and how they work together.</span></span></button>
             <button data-preset="bio" class="preset-option card" type="button"><i data-lucide="dna"></i><span><strong>Biological Signaling</strong><span class="muted">Receptors, kinases and a signaling pathway.</span></span></button>
+            <button data-preset="trends" class="preset-option card" type="button"><i data-lucide="activity"></i><span><strong>Live AI Trends <span class="live-pill">Live</span></strong><span class="muted">Today's AiTrendz stories, linked by topic and shared tags.</span></span></button>
         </div>
+    </dialog>
+
+    <!-- Save / import / export dialog -->
+    <dialog id="file-modal" class="modal panel" aria-labelledby="file-title">
+        <div class="modal-head">
+            <h2 id="file-title"><i data-lucide="share-2"></i> Save &amp; share</h2>
+            <button class="icon-btn" type="button" data-close aria-label="Close"><i data-lucide="x"></i></button>
+        </div>
+        <section class="file-group" aria-labelledby="file-local-title">
+            <h3 id="file-local-title" class="section-title">This browser</h3>
+            <p id="saved-info" class="muted small">Nothing saved yet.</p>
+            <div class="btn-row">
+                <button id="save-local" class="btn primary" type="button"><i data-lucide="download"></i> Save graph</button>
+                <button id="load-local" class="btn" type="button"><i data-lucide="rotate-ccw"></i> Load saved</button>
+                <button id="clear-local" class="btn danger" type="button"><i data-lucide="trash"></i> Delete saved</button>
+            </div>
+        </section>
+        <section class="file-group" aria-labelledby="file-files-title">
+            <h3 id="file-files-title" class="section-title">Files</h3>
+            <div class="btn-row">
+                <button id="export-json" class="btn" type="button"><i data-lucide="file-text"></i> Export JSON</button>
+                <button id="import-json" class="btn" type="button"><i data-lucide="upload"></i> Import JSON</button>
+                <button id="export-png" class="btn" type="button"><i data-lucide="download"></i> Export PNG</button>
+            </div>
+            <input type="file" id="import-file" accept=".json,application/json" hidden>
+            <p class="muted small">Saving stays on this device. Nothing is uploaded.</p>
+        </section>
+        <p id="file-error" class="form-error" role="alert"></p>
+    </dialog>
+
+    <!-- Keyboard shortcuts dialog -->
+    <dialog id="shortcuts-modal" class="modal panel" aria-labelledby="shortcuts-title">
+        <div class="modal-head">
+            <h2 id="shortcuts-title"><i data-lucide="keyboard"></i> Keyboard shortcuts</h2>
+            <button class="icon-btn" type="button" data-close aria-label="Close"><i data-lucide="x"></i></button>
+        </div>
+        <dl class="shortcuts">
+            <dt><kbd>Tab</kbd> to the graph, then <kbd>&larr;</kbd> <kbd>&uarr;</kbd> <kbd>&rarr;</kbd> <kbd>&darr;</kbd></dt><dd>Move to the nearest node in that direction</dd>
+            <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>Previous / next node in list order</dd>
+            <dt><kbd>Enter</kbd> or <kbd>Space</kbd></dt><dd>Open the node's details</dd>
+            <dt><kbd>P</kbd></dt><dd>Pin or unpin the node</dd>
+            <dt><kbd>F</kbd></dt><dd>Center the node in view</dd>
+            <dt><kbd>+</kbd> <kbd>&minus;</kbd> <kbd>0</kbd></dt><dd>Zoom in, zoom out, fit to screen</dd>
+            <dt><kbd>/</kbd></dt><dd>Search</dd>
+            <dt><kbd>Esc</kbd></dt><dd>Close the open panel or clear search</dd>
+        </dl>
     </dialog>
 
     <!-- Add node dialog -->
@@ -194,6 +252,7 @@
 
     <script src="vendor/d3.min.js"></script>
     <script src="vendor/lucide-icons.js"></script>
+    <script src="trends-snapshot.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
